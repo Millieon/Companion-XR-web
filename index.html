@@ -428,6 +428,16 @@
     z-index: 2;
     -webkit-tap-highlight-color: transparent;
   }
+
+  /* Utility: general hidden helper used across the UI */
+  .hidden { display: none !important; }
+
+  /* AI action pill shown when AI mode is active */
+  #ai-action {
+    transition: transform 0.18s ease, box-shadow 0.18s ease;
+    transform-origin: center;
+  }
+  #ai-action.pulse { transform: translateX(-50%) scale(1.04); box-shadow: 0 6px 18px rgba(0,0,0,0.28); }
 </style>
 </head>
 <body>
@@ -489,6 +499,27 @@
     <button class="btn btn-ghost" onclick="useDemoModel()" style="width:100%;">
       🐱 Use demo cat (no file needed)
     </button>
+  </div>
+</div>
+
+<!-- Fallback AR controls (shown when user requests AR but WebXR is not presenting) -->
+<div id="fallback-ar-controls" class="ar-interaction-ui hidden" style="position: fixed; left: 50%; transform: translateX(-50%); bottom: 24px; z-index: 60;">
+  <div class="ar-bubble" id="fallback-ar-bubble">Purrrr~ 💕</div>
+  <div class="ar-stats" id="fallback-ar-stats">
+    <span>💖 <span id="fallback-ar-val-happy">70</span>%</span>
+    <span>🍎 <span id="fallback-ar-val-full">40</span>%</span>
+  </div>
+  <div class="ar-mood-row">
+    <button type="button" class="ar-mood-btn" data-act="feed" title="Feed">🍎</button>
+    <button type="button" class="ar-mood-btn" data-act="pet" title="Pet">🤚</button>
+    <button type="button" class="ar-mood-btn" data-act="play" title="Play">🧶</button>
+    <button type="button" class="ar-mood-btn" data-act="sleep" title="Sleep">😴</button>
+  </div>
+  <div class="ar-action-row" style="margin-top:8px;">
+    <button type="button" class="ar-action-btn" id="fallback-ar-btn-drink" title="Drink water">💧</button>
+    <button type="button" class="ar-action-btn" id="fallback-ar-btn-stats" title="Stats">📊</button>
+    <button type="button" class="ar-action-btn" id="fallback-ar-btn-task" title="Complete task">✅</button>
+    <button type="button" class="ar-action-btn" id="fallback-ar-btn-photo" title="Screenshot">📸</button>
   </div>
 </div>
 
@@ -566,6 +597,11 @@
       <div class="dot" id="status-dot" style="background:var(--green);"></div>
       <span id="status-text">3D Preview</span>
     </div>
+  </div>
+
+  <!-- AI MODE ACTION (hidden until AI mode is active) -->
+  <div id="ai-action" class="pill hidden" title="Start AI scan" style="position: absolute; left:50%; transform: translateX(-50%); top: calc(var(--safe-top) + 64px); cursor: pointer; z-index:12;">
+    🔎 AI Mode — Tap to scan for a glass
   </div>
 
   <!-- Stats -->
@@ -745,6 +781,35 @@
     }
   });
 
+  // Show a fallback AR controls panel when the user requests AR.
+  // This helps on platforms (Quick Look) where the page itself is not presenting WebXR,
+  // so the user still has familiar interaction buttons before/after AR.
+  const fallbackAr = document.getElementById('fallback-ar-controls');
+  document.getElementById('btn-ar').addEventListener('click', () => {
+    if (fallbackAr) fallbackAr.classList.remove('hidden');
+  });
+
+  // Observe model-viewer's `ar-status` attribute and toggle UI based on session state.
+  const mo = new MutationObserver((records) => {
+    for (const r of records) {
+      if (r.attributeName !== 'ar-status') continue;
+      const val = viewer.getAttribute('ar-status');
+      // When object is placed in WebXR, ensure AR interaction UI is visible.
+      if (val === 'object-placed') {
+        // hide fallback (we're in real in-viewer AR)
+        if (fallbackAr) fallbackAr.classList.add('hidden');
+        // also show the 2D overlay stats and AR bubble in case overlay is hidden
+        document.getElementById('overlay').style.display = 'flex';
+      }
+      // When exiting AR, hide fallback and restore overlay state
+      if (!val || val === 'not-presenting') {
+        if (fallbackAr) fallbackAr.classList.add('hidden');
+        // keep overlay visible when not presenting
+      }
+    }
+  });
+  mo.observe(viewer, { attributes: true });
+
   // Update AR button state after model loads
   viewer.addEventListener('load', () => {
     const arBtn = document.getElementById('btn-ar');
@@ -873,6 +938,45 @@
       doAction(btn.dataset.act);
     });
   });
+
+  // Wire the fallback AR controls to the same logic
+  (function wireFallbackAR(){
+    const fallback = document.getElementById('fallback-ar-controls');
+    if (!fallback) return;
+
+    fallback.querySelectorAll('.ar-mood-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        doAction(btn.dataset.act);
+        btn.classList.add('pop');
+        setTimeout(() => btn.classList.remove('pop'), 350);
+      });
+    });
+
+    const fDrink = document.getElementById('fallback-ar-btn-drink');
+    const fStats = document.getElementById('fallback-ar-btn-stats');
+    const fTask = document.getElementById('fallback-ar-btn-task');
+    const fPhoto = document.getElementById('fallback-ar-btn-photo');
+
+    if (fDrink) fDrink.addEventListener('click', (e) => { e.stopPropagation(); showArDrinkReminder(); });
+    if (fStats) fStats.addEventListener('click', (e) => { e.stopPropagation(); document.getElementById('fallback-ar-stats').classList.toggle('show'); });
+    if (fTask) fTask.addEventListener('click', (e) => { e.stopPropagation(); doAction('task'); });
+    if (fPhoto) fPhoto.addEventListener('click', (e) => {
+      e.stopPropagation();
+      // Reuse same screenshot flow as normal photo button
+      viewer.toBlob({ idealAspect: false }).then(blob => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.download = `comfort-ar-${Date.now()}.png`;
+        a.href = url; a.click(); URL.revokeObjectURL(url);
+        const b = document.getElementById('fallback-ar-bubble');
+        if (b) { b.textContent = 'Saved! 📸'; b.classList.add('show'); clearTimeout(b._t); b._t = setTimeout(() => b.classList.remove('show'), 2000); }
+      }).catch(() => {
+        const b = document.getElementById('fallback-ar-bubble');
+        if (b) { b.textContent = 'Screenshot saved'; b.classList.add('show'); clearTimeout(b._t); b._t = setTimeout(() => b.classList.remove('show'), 2000); }
+      });
+    });
+  })();
 
   /* AR action buttons: 💧 Drink, 📊 Stats, ✅ Task, 📸 Photo (in AR mode) */
   const arBubble = document.getElementById('ar-bubble');
@@ -1052,6 +1156,41 @@
   document.getElementById('ai-close').addEventListener('click', stopAIDetection);
 
   // Passive stat decay
+  // --- AI mode helper: show a small action and expose a programmatic hook ---
+  (function setupAIModeHook(){
+    const aiAction = document.getElementById('ai-action');
+    if (aiAction) {
+      aiAction.addEventListener('click', () => {
+        // When user taps the pill, start the AI detection overlay
+        try { startAIDetection(); } catch (e) { /* ignore */ }
+        aiAction.classList.add('pulse');
+        setTimeout(() => aiAction.classList.remove('pulse'), 600);
+      });
+    }
+
+    // Expose a global helper so other parts of the app can toggle AI mode
+    window.setAIMode = function(enabled) {
+      const on = !!enabled;
+      if (aiAction) aiAction.classList.toggle('hidden', !on);
+      // update status pill in the top bar for quick feedback
+      const statusText = document.getElementById('status-text');
+      const statusDot = document.getElementById('status-dot');
+      if (statusText) statusText.textContent = on ? 'AI Mode' : '3D Preview';
+      if (statusDot) statusDot.style.background = on ? 'var(--warm)' : 'var(--green)';
+
+      if (on) {
+        // auto-start the camera/detection when AI mode is entered
+        try { startAIDetection(); } catch (e) { /* ignore */ }
+      } else {
+        stopAIDetection();
+      }
+    };
+
+    // Listen for optional custom events from the app
+    document.addEventListener('ai-mode:entered', () => window.setAIMode(true));
+    document.addEventListener('ai-mode:exited', () => window.setAIMode(false));
+  })();
+
   setInterval(() => {
     S.happiness = Math.max(0, S.happiness - 0.3);
     S.fullness = Math.max(0, S.fullness - 0.5);
