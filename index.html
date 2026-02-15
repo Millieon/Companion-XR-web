@@ -309,6 +309,37 @@
     color: rgba(255,255,255,0.5);
     font-weight: 600;
   }
+  model-viewer[ar-status="object-placed"] .ar-interaction-ui .ar-action-row {
+    display: flex;
+    gap: 8px;
+  }
+  model-viewer[ar-status="object-placed"] .ar-interaction-ui .ar-action-btn {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: 2px solid rgba(255,255,255,0.15);
+    background: rgba(255,255,255,0.1);
+    font-size: 20px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.15s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  model-viewer[ar-status="object-placed"] .ar-interaction-ui .ar-action-btn:active {
+    transform: scale(1.1);
+    border-color: var(--warm-light);
+    background: rgba(232,168,124,0.2);
+  }
+  .ar-stats {
+    display: none;
+    gap: 12px;
+    font-size: 12px;
+    font-weight: 700;
+    color: rgba(255,255,255,0.9);
+  }
+  .ar-stats.show { display: flex; }
   .ar-bubble {
     position: absolute;
     left: 50%;
@@ -499,11 +530,22 @@
   <!-- AR: interaction UI when object is placed (WebXR only) -->
   <div class="ar-interaction-ui">
     <div class="ar-bubble" id="ar-bubble">Purrrr~ 💕</div>
+    <!-- Stats strip (toggle in AR) -->
+    <div class="ar-stats" id="ar-stats">
+      <span>💖 <span id="ar-val-happy">70</span>%</span>
+      <span>🍎 <span id="ar-val-full">40</span>%</span>
+    </div>
     <div class="ar-mood-row">
       <button type="button" class="ar-mood-btn" data-act="feed" title="Feed">🍎</button>
       <button type="button" class="ar-mood-btn" data-act="pet" title="Pet">🤚</button>
       <button type="button" class="ar-mood-btn" data-act="play" title="Play">🧶</button>
       <button type="button" class="ar-mood-btn" data-act="sleep" title="Sleep">😴</button>
+    </div>
+    <div class="ar-action-row">
+      <button type="button" class="ar-action-btn" id="ar-btn-drink" title="Drink water">💧</button>
+      <button type="button" class="ar-action-btn" id="ar-btn-stats" title="Stats">📊</button>
+      <button type="button" class="ar-action-btn" id="ar-btn-task" title="Complete task">✅</button>
+      <button type="button" class="ar-action-btn" id="ar-btn-photo" title="Screenshot">📸</button>
     </div>
     <span class="ar-hint">Tap to interact with your pet</span>
   </div>
@@ -774,12 +816,16 @@
     }
   }
 
-  /* ── Stats ── */
+  /* ── Stats (2D overlay + AR in-viewer strip) ── */
   function updateStats() {
     document.getElementById('bar-happy').style.width = S.happiness + '%';
     document.getElementById('val-happy').textContent = S.happiness + '%';
     document.getElementById('bar-full').style.width = S.fullness + '%';
     document.getElementById('val-full').textContent = S.fullness + '%';
+    const arHappy = document.getElementById('ar-val-happy');
+    const arFull = document.getElementById('ar-val-full');
+    if (arHappy) arHappy.textContent = Math.round(S.happiness);
+    if (arFull) arFull.textContent = Math.round(S.fullness);
   }
 
   /* ── Bubble (2D overlay + AR in-viewer bubble) ── */
@@ -825,6 +871,53 @@
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       doAction(btn.dataset.act);
+    });
+  });
+
+  /* AR action buttons: 💧 Drink, 📊 Stats, ✅ Task, 📸 Photo (in AR mode) */
+  const arBubble = document.getElementById('ar-bubble');
+  function showArDrinkReminder() {
+    arBubble.textContent = 'Drink water! 💧';
+    arBubble.classList.add('show');
+    clearTimeout(arBubble._t);
+    arBubble._t = setTimeout(() => arBubble.classList.remove('show'), 3500);
+    if (typeof speechSynthesis !== 'undefined' && speechSynthesis.speak) {
+      const u = new SpeechSynthesisUtterance('Drink water!');
+      u.rate = 0.9;
+      speechSynthesis.speak(u);
+    }
+  }
+
+  viewer.querySelector('#ar-btn-drink').addEventListener('click', (e) => {
+    e.stopPropagation();
+    showArDrinkReminder();
+  });
+  viewer.querySelector('#ar-btn-stats').addEventListener('click', (e) => {
+    e.stopPropagation();
+    document.getElementById('ar-stats').classList.toggle('show');
+  });
+  viewer.querySelector('#ar-btn-task').addEventListener('click', (e) => {
+    e.stopPropagation();
+    doAction('task');
+  });
+  viewer.querySelector('#ar-btn-photo').addEventListener('click', (e) => {
+    e.stopPropagation();
+    viewer.toBlob({ idealAspect: false }).then(blob => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.download = `comfort-ar-${Date.now()}.png`;
+      a.href = url;
+      a.click();
+      URL.revokeObjectURL(url);
+      arBubble.textContent = 'Saved! 📸';
+      arBubble.classList.add('show');
+      clearTimeout(arBubble._t);
+      arBubble._t = setTimeout(() => arBubble.classList.remove('show'), 2000);
+    }).catch(() => {
+      arBubble.textContent = 'Screenshot from main view';
+      arBubble.classList.add('show');
+      clearTimeout(arBubble._t);
+      arBubble._t = setTimeout(() => arBubble.classList.remove('show'), 2500);
     });
   });
 
@@ -967,4 +1060,3 @@
 </script>
 </body>
 </html>
-
