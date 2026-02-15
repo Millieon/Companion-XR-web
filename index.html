@@ -238,6 +238,95 @@
   @media (min-width: 600px) {
     .bottom { padding-left: 10%; padding-right: 10%; }
   }
+
+  /* ═══════════════════════════════════════
+     AR INTERACTION (WebXR only — shown when object is placed)
+     ═══════════════════════════════════════ */
+  .ar-place-hint,
+  .ar-interaction-ui { display: none; }
+
+  /* Hint while finding a surface */
+  model-viewer[ar-status="session-started"] .ar-place-hint {
+    display: flex;
+    position: absolute;
+    bottom: 28%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0,0,0,0.7);
+    color: rgba(255,255,255,0.9);
+    padding: 12px 20px;
+    border-radius: 14px;
+    font-size: 14px;
+    font-weight: 600;
+    pointer-events: none;
+    animation: arHintPulse 1.5s ease-in-out infinite;
+  }
+  @keyframes arHintPulse { 0%,100%{opacity:0.9} 50%{opacity:0.6} }
+
+  /* Interaction bar — only when object is placed in AR */
+  model-viewer[ar-status="object-placed"] .ar-interaction-ui {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    position: absolute;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 12px 16px;
+    background: rgba(0,0,0,0.65);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    pointer-events: auto;
+  }
+  model-viewer[ar-status="object-placed"] .ar-interaction-ui .ar-mood-row {
+    display: flex;
+    gap: 10px;
+  }
+  model-viewer[ar-status="object-placed"] .ar-interaction-ui .ar-mood-btn {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    border: 2px solid rgba(255,255,255,0.15);
+    background: rgba(255,255,255,0.1);
+    font-size: 22px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.15s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  model-viewer[ar-status="object-placed"] .ar-interaction-ui .ar-mood-btn:active {
+    transform: scale(1.15);
+    border-color: var(--warm-light);
+    background: rgba(232,168,124,0.2);
+  }
+  model-viewer[ar-status="object-placed"] .ar-interaction-ui .ar-hint {
+    font-size: 11px;
+    color: rgba(255,255,255,0.5);
+    font-weight: 600;
+  }
+  .ar-bubble {
+    position: absolute;
+    left: 50%;
+    bottom: 120px;
+    transform: translateX(-50%);
+    pointer-events: none;
+    background: rgba(255,255,255,0.95);
+    color: #2D1B06;
+    border-radius: 14px 14px 14px 4px;
+    padding: 10px 18px;
+    font-size: 15px;
+    font-weight: 600;
+    white-space: nowrap;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+    opacity: 0;
+    transition: opacity 0.25s, transform 0.25s;
+  }
+  .ar-bubble.show { opacity: 1; transform: translateX(-50%) translateY(-8px); }
 </style>
 </head>
 <body>
@@ -332,6 +421,21 @@
     <div class="mv-progress-bar">
       <div class="mv-progress-fill" id="load-progress" style="width:0%;"></div>
     </div>
+  </div>
+
+  <!-- AR: hint to find a surface (WebXR session started) -->
+  <div class="ar-place-hint">👆 Move your phone to find a surface</div>
+
+  <!-- AR: interaction UI when object is placed (WebXR only) -->
+  <div class="ar-interaction-ui">
+    <div class="ar-bubble" id="ar-bubble">Purrrr~ 💕</div>
+    <div class="ar-mood-row">
+      <button type="button" class="ar-mood-btn" data-act="feed" title="Feed">🍎</button>
+      <button type="button" class="ar-mood-btn" data-act="pet" title="Pet">🤚</button>
+      <button type="button" class="ar-mood-btn" data-act="play" title="Play">🧶</button>
+      <button type="button" class="ar-mood-btn" data-act="sleep" title="Sleep">😴</button>
+    </div>
+    <span class="ar-hint">Tap to interact with your pet</span>
   </div>
 
   <!-- AR prompt (shown when entering AR) -->
@@ -595,14 +699,17 @@
     document.getElementById('val-full').textContent = S.fullness + '%';
   }
 
-  /* ── Bubble ── */
+  /* ── Bubble (2D overlay + AR in-viewer bubble) ── */
   function showBubble(action) {
-    const b = document.getElementById('bubble');
     const list = REACTIONS[action] || REACTIONS.pet;
-    b.textContent = list[Math.floor(Math.random() * list.length)];
-    b.classList.add('show');
-    clearTimeout(b._t);
-    b._t = setTimeout(() => b.classList.remove('show'), 2200);
+    const msg = list[Math.floor(Math.random() * list.length)];
+    [document.getElementById('bubble'), document.getElementById('ar-bubble')].forEach(b => {
+      if (!b) return;
+      b.textContent = msg;
+      b.classList.add('show');
+      clearTimeout(b._t);
+      b._t = setTimeout(() => b.classList.remove('show'), 2200);
+    });
   }
 
   /* ── Particles ── */
@@ -628,6 +735,21 @@
       btn.classList.add('pop');
       setTimeout(() => btn.classList.remove('pop'), 350);
     });
+  });
+
+  /* AR mood buttons (inside model-viewer — visible in WebXR when object is placed) */
+  viewer.querySelectorAll('.ar-mood-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      doAction(btn.dataset.act);
+    });
+  });
+
+  /* Tap on 3D model in non-AR mode = pet */
+  viewer.addEventListener('click', () => {
+    if (!viewer.getAttribute('ar-status') || viewer.getAttribute('ar-status') === 'not-presenting') {
+      doAction('pet');
+    }
   });
 
   document.getElementById('btn-stats').addEventListener('click', () => {
@@ -672,3 +794,4 @@
 </script>
 </body>
 </html>
+
