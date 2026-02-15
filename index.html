@@ -5,123 +5,1197 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>Comfort — Your Pet in AR</title>
 
-<script type="module" src="https://ajax.googleapis.com"></script>
-<link href="https://fonts.googleapis.com" rel="stylesheet">
+<!-- Google model-viewer: handles GLB loading + native AR on Android & iOS -->
+<script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js"></script>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700;9..40,800&display=swap" rel="stylesheet">
 
 <style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
   :root {
-    --warm: #D4845F; --warm-light: #E8A87C; --bg: #0c0906;
-    --text: #FBF8F4; --radius: 16px;
+    --warm: #D4845F; --warm-light: #E8A87C; --green: #7BC8A4;
+    --bg: #0c0906; --surface: rgba(255,255,255,0.04);
+    --border: rgba(255,255,255,0.06); --text: #FBF8F4;
+    --text-dim: rgba(255,255,255,0.45); --text-faint: rgba(255,255,255,0.25);
+    --radius: 16px; --radius-sm: 10px;
+    --safe-bottom: max(env(safe-area-inset-bottom, 16px), 16px);
+    --safe-top: max(env(safe-area-inset-top, 12px), 12px);
   }
 
-  body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--text); margin: 0; overflow: hidden; }
+  body {
+    font-family: 'DM Sans', system-ui, sans-serif;
+    background: var(--bg); color: var(--text);
+    overflow: hidden; width: 100vw; height: 100dvh;
+    -webkit-user-select: none; user-select: none;
+  }
 
-  /* 1. MODEL VIEWER CONFIG */
+  /* ═══════════════════════════════════════
+     MODEL VIEWER — full screen
+     ═══════════════════════════════════════ */
   model-viewer {
-    width: 100vw; height: 100dvh;
-    background: radial-gradient(circle at center, #1a1510 0%, #0c0906 100%);
+    width: 100%; height: 100dvh;
+    --poster-color: transparent;
+    background: radial-gradient(ellipse at 50% 120%, rgba(232,168,124,0.06) 0%, var(--bg) 60%);
   }
 
-  /* 2. UI VISIBILITY LOGIC (AR vs 2D) */
-  /* Hide specific UI elements when NOT in AR */
-  .ar-only { display: none; }
+  /* Override the default AR button */
+  model-viewer::part(default-ar-button) { display: none; }
 
-  /* Show these elements only when WebXR AR session starts */
-  model-viewer[ar-status="session-started"] .ar-only {
+  /* Loading bar inside model-viewer */
+  .mv-progress {
+    position: absolute; bottom: 50%; left: 50%; transform: translate(-50%, 50%);
+    display: flex; flex-direction: column; align-items: center; gap: 12px;
+  }
+  .mv-progress-text { font-size: 13px; color: var(--text-dim); font-weight: 500; }
+  .mv-progress-bar {
+    width: 140px; height: 4px; background: rgba(255,255,255,0.06);
+    border-radius: 2px; overflow: hidden;
+  }
+  .mv-progress-fill {
+    height: 100%; background: linear-gradient(90deg, var(--warm), var(--warm-light));
+    border-radius: 2px; transition: width 0.3s;
+  }
+
+  /* ═══════════════════════════════════════
+     OVERLAY UI
+     ═══════════════════════════════════════ */
+  #overlay {
+    position: fixed; inset: 0; pointer-events: none; z-index: 10;
+    display: flex; flex-direction: column;
+  }
+  #overlay > * { pointer-events: auto; }
+
+  /* ── Top bar ── */
+  .top-bar {
+    padding: var(--safe-top) 16px 10px;
+    background: linear-gradient(180deg, rgba(0,0,0,0.5) 0%, transparent 100%);
+    display: flex; justify-content: space-between; align-items: flex-start;
+  }
+  .brand { font-size: 22px; font-weight: 800; letter-spacing: -0.5px; }
+  .brand em { font-style: normal; color: var(--warm-light); }
+
+  .pill {
+    background: rgba(255,255,255,0.1); backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid var(--border); border-radius: 20px;
+    padding: 5px 12px; font-size: 11px; font-weight: 600;
+    display: flex; align-items: center; gap: 6px;
+    color: rgba(255,255,255,0.85);
+  }
+  .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1}50%{opacity:0.3} }
+
+  /* ── Instruction banner ── */
+  .instructions {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    pointer-events: none; text-align: center; padding: 0 24px;
+    opacity: 1; transition: opacity 0.6s;
+  }
+  .instructions.fade { opacity: 0; }
+  .instructions h2 {
+    font-size: 20px; font-weight: 700; margin-bottom: 6px;
+  }
+  .instructions p { font-size: 13px; color: var(--text-dim); line-height: 1.5; }
+  .hint-orbit {
+    margin-top: 14px; display: inline-flex; align-items: center; gap: 8px;
+    background: rgba(255,255,255,0.06); border: 1px solid var(--border);
+    border-radius: 12px; padding: 8px 16px; font-size: 12px;
+    color: rgba(255,255,255,0.55); font-weight: 500;
+  }
+
+  /* ── Stats overlay (compact) ── */
+  .stats-bar {
+    position: absolute; top: 60px; left: 16px; right: 16px;
+    background: rgba(10,6,3,0.65); backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--border); border-radius: 14px;
+    padding: 12px 14px; display: none;
+  }
+  .stats-bar.show { display: block; }
+  .stat-row {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+  }
+  .stat-row:last-child { margin-bottom: 0; }
+  .stat-emoji { font-size: 14px; width: 20px; text-align: center; }
+  .stat-label { font-size: 10px; color: var(--text-dim); font-weight: 600; width: 52px; text-transform: uppercase; letter-spacing: 0.3px; }
+  .stat-track { flex: 1; height: 4px; background: rgba(255,255,255,0.06); border-radius: 2px; overflow: hidden; }
+  .stat-fill { height: 100%; border-radius: 2px; transition: width 0.5s ease; }
+  .stat-val { font-size: 11px; font-weight: 700; width: 30px; text-align: right; }
+
+  /* ── Reaction bubble ── */
+  .bubble {
+    position: absolute; left: 50%; bottom: 200px;
+    transform: translateX(-50%); pointer-events: none;
+    background: rgba(255,255,255,0.92); color: #2D1B06;
+    border-radius: 14px 14px 14px 4px; padding: 8px 16px;
+    font-size: 14px; font-weight: 600; white-space: nowrap;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.35);
+    opacity: 0; transition: opacity 0.25s, transform 0.25s;
+  }
+  .bubble.show { opacity: 1; transform: translateX(-50%) translateY(-10px); }
+
+  /* ── Bottom controls ── */
+  .bottom {
+    margin-top: auto;
+    padding: 0 16px var(--safe-bottom);
+    background: linear-gradient(0deg, rgba(0,0,0,0.6) 0%, transparent 100%);
+    display: flex; flex-direction: column; gap: 10px; align-items: center;
+    padding-top: 32px;
+  }
+
+  .mood-row { display: flex; gap: 8px; }
+  .mood-btn {
+    width: 46px; height: 46px; border-radius: 50%;
+    border: 2px solid rgba(255,255,255,0.08);
+    background: rgba(255,255,255,0.04); font-size: 20px;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    transition: all 0.15s; -webkit-tap-highlight-color: transparent;
+  }
+  .mood-btn:active, .mood-btn.pop {
+    border-color: var(--warm-light); background: rgba(232,168,124,0.12);
+    transform: scale(1.15);
+  }
+
+  .action-row { display: flex; gap: 10px; width: 100%; max-width: 400px; }
+
+  .btn {
+    border: none; border-radius: var(--radius); padding: 14px 20px;
+    font-family: inherit; font-size: 14px; font-weight: 700;
+    cursor: pointer; transition: transform 0.12s;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .btn:active { transform: scale(0.96); }
+  .btn-warm { background: linear-gradient(135deg, var(--warm), var(--warm-light)); color: #FFF; box-shadow: 0 4px 20px rgba(212,132,95,0.3); }
+  .btn-green { background: linear-gradient(135deg, #2D6A4F, #3D8B6A); color: #FFF; box-shadow: 0 4px 20px rgba(45,106,79,0.25); }
+  .btn-ghost {
+    background: rgba(255,255,255,0.08); backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid var(--border); color: rgba(255,255,255,0.85);
+  }
+  .btn-icon {
+    width: 48px; height: 48px; padding: 0; border-radius: 50%; flex-shrink: 0;
+    font-size: 20px;
+  }
+
+  /* ── Upload overlay ── */
+  .upload-overlay {
+    position: fixed; inset: 0; z-index: 100;
+    background: var(--bg);
+    display: flex; flex-direction: column; padding: 20px;
+    overflow-y: auto;
+  }
+  .upload-overlay.hidden { display: none; }
+  .upload-zone {
+    border: 2px dashed rgba(255,255,255,0.12); border-radius: 20px;
+    padding: 40px 20px; text-align: center; cursor: pointer;
+    background: var(--surface); transition: border-color 0.2s;
+    margin-bottom: 16px;
+  }
+  .upload-zone:hover { border-color: rgba(232,168,124,0.3); }
+  .upload-zone.has-file { border-style: solid; border-color: rgba(123,200,164,0.4); }
+  .upload-zone .icon { font-size: 40px; margin-bottom: 8px; }
+  .upload-zone .title { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+  .upload-zone .hint { font-size: 12px; color: var(--text-dim); }
+
+  .file-preview {
+    width: 100%; border-radius: 16px; overflow: hidden;
+    margin-bottom: 16px; position: relative; display: none;
+  }
+  .file-preview img { width: 100%; display: block; border-radius: 16px; max-height: 200px; object-fit: cover; }
+  .file-preview.show { display: block; }
+
+  .tip-card {
+    display: flex; gap: 10px; align-items: flex-start;
+    background: rgba(232,168,124,0.06); border: 1px solid rgba(232,168,124,0.1);
+    border-radius: 12px; padding: 12px 14px; margin-bottom: 16px;
+  }
+  .tip-card .tip-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+  .tip-card .tip-text { font-size: 12px; color: rgba(255,255,255,0.55); line-height: 1.5; }
+
+  /* ── Particles ── */
+  #particles { position: fixed; inset: 0; pointer-events: none; z-index: 15; }
+  .particle {
+    position: absolute; font-size: 22px; pointer-events: none;
+    animation: rise 1.1s ease-out forwards;
+  }
+  @keyframes rise { 0%{opacity:1;transform:translateY(0) scale(0.4)} 100%{opacity:0;transform:translateY(-90px) scale(1.3)} }
+
+  /* ── Flash ── */
+  .flash {
+    position: fixed; inset: 0; background: #FFF; z-index: 200;
+    opacity: 0; pointer-events: none;
+    animation: flashFx 0.35s ease-out forwards;
+  }
+  @keyframes flashFx { 0%{opacity:0.85} 100%{opacity:0} }
+
+  /* ── Responsive ── */
+  @media (min-width: 600px) {
+    .bottom { padding-left: 10%; padding-right: 10%; }
+  }
+
+  /* ═══════════════════════════════════════
+     AR INTERACTION (WebXR only — shown when object is placed)
+     ═══════════════════════════════════════ */
+  .ar-place-hint,
+  .ar-interaction-ui { display: none; }
+
+  /* Hint while finding a surface */
+  model-viewer[ar-status="session-started"] .ar-place-hint {
+    display: flex;
+    position: absolute;
+    bottom: 28%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0,0,0,0.7);
+    color: rgba(255,255,255,0.9);
+    padding: 12px 20px;
+    border-radius: 14px;
+    font-size: 14px;
+    font-weight: 600;
+    pointer-events: none;
+    animation: arHintPulse 1.5s ease-in-out infinite;
+  }
+  @keyframes arHintPulse { 0%,100%{opacity:0.9} 50%{opacity:0.6} }
+
+  /* Interaction bar — only when object is placed in AR */
+  model-viewer[ar-status="object-placed"] .ar-interaction-ui {
     display: flex;
     flex-direction: column;
     align-items: center;
+    gap: 10px;
     position: absolute;
-    bottom: 40px;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 12px 16px;
+    background: rgba(0,0,0,0.65);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    pointer-events: auto;
+  }
+  model-viewer[ar-status="object-placed"] .ar-interaction-ui .ar-mood-row {
+    display: flex;
+    gap: 10px;
+  }
+  model-viewer[ar-status="object-placed"] .ar-interaction-ui .ar-mood-btn {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    border: 2px solid rgba(255,255,255,0.15);
+    background: rgba(255,255,255,0.1);
+    font-size: 22px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.15s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  model-viewer[ar-status="object-placed"] .ar-interaction-ui .ar-mood-btn:active {
+    transform: scale(1.15);
+    border-color: var(--warm-light);
+    background: rgba(232,168,124,0.2);
+  }
+  model-viewer[ar-status="object-placed"] .ar-interaction-ui .ar-hint {
+    font-size: 11px;
+    color: rgba(255,255,255,0.5);
+    font-weight: 600;
+  }
+  model-viewer[ar-status="object-placed"] .ar-interaction-ui .ar-action-row {
+    display: flex;
+    gap: 8px;
+  }
+  model-viewer[ar-status="object-placed"] .ar-interaction-ui .ar-action-btn {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: 2px solid rgba(255,255,255,0.15);
+    background: rgba(255,255,255,0.1);
+    font-size: 20px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.15s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  model-viewer[ar-status="object-placed"] .ar-interaction-ui .ar-action-btn:active {
+    transform: scale(1.1);
+    border-color: var(--warm-light);
+    background: rgba(232,168,124,0.2);
+  }
+  .ar-stats {
+    display: none;
+    gap: 12px;
+    font-size: 12px;
+    font-weight: 700;
+    color: rgba(255,255,255,0.9);
+  }
+  .ar-stats.show { display: flex; }
+  .ar-bubble {
+    position: absolute;
+    left: 50%;
+    bottom: 120px;
+    transform: translateX(-50%);
+    pointer-events: none;
+    background: rgba(255,255,255,0.95);
+    color: #2D1B06;
+    border-radius: 14px 14px 14px 4px;
+    padding: 10px 18px;
+    font-size: 15px;
+    font-weight: 600;
+    white-space: nowrap;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+    opacity: 0;
+    transition: opacity 0.25s, transform 0.25s;
+  }
+  .ar-bubble.show { opacity: 1; transform: translateX(-50%) translateY(-8px); }
+
+  /* ═══════════════════════════════════════
+     AI overlay (camera + object detection)
+     ═══════════════════════════════════════ */
+  .ai-overlay {
+    position: fixed; inset: 0; z-index: 150;
+    background: rgba(0,0,0,0.9);
+    display: none;
+    align-items: center;
+    justify-content: center;
+  }
+  .ai-overlay.show { display: flex; }
+  .ai-overlay-inner {
+    position: relative;
     width: 100%;
-    pointer-events: none; /* Let clicks pass to buttons */
+    max-width: 420px;
+    aspect-ratio: 3/4;
+    border-radius: 20px;
+    overflow: hidden;
+    border: 2px solid var(--border);
+  }
+  .ai-overlay #ai-video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .ai-status {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 12px 16px;
+    background: linear-gradient(0deg, rgba(0,0,0,0.85), transparent);
+    color: rgba(255,255,255,0.9);
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .ai-bubble {
+    position: absolute;
+    top: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: linear-gradient(135deg, #2D6A4F, #3D8B6A);
+    color: #FFF;
+    padding: 14px 24px;
+    border-radius: 16px;
+    font-size: 18px;
+    font-weight: 700;
+    box-shadow: 0 4px 24px rgba(45,106,79,0.4);
+    opacity: 0;
+    transition: opacity 0.3s, transform 0.3s;
+    pointer-events: none;
+  }
+  .ai-bubble.show { opacity: 1; transform: translateX(-50%) translateY(-4px); }
+  .ai-close {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(0,0,0,0.6);
+    color: #FFF;
+    font-size: 20px;
+    cursor: pointer;
+    z-index: 2;
+    -webkit-tap-highlight-color: transparent;
   }
 
-  /* 3. BUTTON STYLING */
-  .btn-container { display: flex; gap: 15px; pointer-events: auto; }
-  
-  .mood-btn {
-    width: 60px; height: 60px; border-radius: 50%;
-    border: 3px solid white; background: rgba(0,0,0,0.5);
-    font-size: 28px; cursor: pointer; display: flex;
-    align-items: center; justify-content: center;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.3);
-  }
+  /* Utility: general hidden helper used across the UI */
+  .hidden { display: none !important; }
 
-  .bubble {
-    background: white; color: black; padding: 10px 20px;
-    border-radius: 20px; margin-bottom: 15px; font-weight: bold;
-    opacity: 0; transition: opacity 0.3s;
+  /* AI action pill shown when AI mode is active */
+  #ai-action {
+    transition: transform 0.18s ease, box-shadow 0.18s ease;
+    transform-origin: center;
   }
-  .bubble.show { opacity: 1; }
-
-  /* Custom AR Button positioning */
-  #custom-ar-button {
-    position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
-    padding: 12px 24px; background: var(--warm); border: none;
-    border-radius: var(--radius); color: white; font-weight: bold;
-  }
+  #ai-action.pulse { transform: translateX(-50%) scale(1.04); box-shadow: 0 6px 18px rgba(0,0,0,0.28); }
 </style>
 </head>
 <body>
 
-  <!-- Ensure ar-modes prefers webxr for DOM overlay support -->
-  <model-viewer id="pet-model" 
-    src="" 
-    ar 
-    ar-modes="webxr scene-viewer quick-look" 
-    camera-controls 
-    touch-action="pan-y">
-    
-    <!-- This div and its children will move INTO AR with you -->
-    <div class="ar-only">
-      <div id="status-bubble" class="bubble">I'm happy!</div>
-      <div class="btn-container">
-        <button class="mood-btn" onclick="performAction('feed')">🍖</button>
-        <button class="mood-btn" onclick="performAction('play')">🧶</button>
-        <button class="mood-btn" onclick="performAction('pet')">❤️</button>
+<!-- ═══════════════════════════════════════════════
+     UPLOAD SCREEN — user provides .glb
+     ═══════════════════════════════════════════════ -->
+<div class="upload-overlay" id="upload-screen">
+  <div style="flex:1;display:flex;flex-direction:column;max-width:420px;margin:0 auto;width:100%;">
+
+    <div style="text-align:center;margin:32px 0 28px;">
+      <div style="font-size:56px;margin-bottom:12px;">🐾</div>
+      <div class="brand" style="font-size:32px;"><em>comfort</em> AR</div>
+      <p style="color:var(--text-dim);font-size:14px;margin-top:4px;">bring your pet into your space</p>
+    </div>
+
+    <div class="upload-zone" id="upload-zone" onclick="document.getElementById('glb-input').click()">
+      <div class="icon">📦</div>
+      <div class="title">Upload your 3D model</div>
+      <div class="hint">.glb file — tap to browse</div>
+    </div>
+    <input type="file" id="glb-input" accept=".glb,.gltf" style="display:none;">
+
+    <div class="file-preview" id="file-preview">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:14px;display:flex;align-items:center;gap:12px;">
+        <span style="font-size:28px;">✅</span>
+        <div>
+          <p id="file-name" style="font-size:14px;font-weight:600;margin-bottom:2px;">model.glb</p>
+          <p id="file-size" style="font-size:12px;color:var(--text-dim);">0 MB</p>
+        </div>
+        <button onclick="clearFile()" style="margin-left:auto;background:rgba(255,255,255,0.06);border:1px solid var(--border);border-radius:8px;padding:6px 10px;color:var(--text-dim);font-size:11px;cursor:pointer;font-family:inherit;">Remove</button>
       </div>
     </div>
 
-    <button slot="ar-button" id="custom-ar-button">
-      ✨ View Pet in Your Room
-    </button>
-  </model-viewer>
+    <div class="tip-card">
+      <span class="tip-icon">💡</span>
+      <span class="tip-text">
+        <strong style="color:var(--text);">Don't have a .glb yet?</strong><br>
+        Upload photos of your pet to <a href="https://www.meshy.ai" target="_blank" style="color:var(--warm-light);">meshy.ai</a> →
+        AI generates a 3D model → download as .glb → upload here.
+        Or use any .glb model to test!
+      </span>
+    </div>
 
-  <!-- Simple Upload for Testing -->
-  <div id="upload-ui" style="position:fixed; top:20px; left:20px; z-index:100;">
-    <input type="file" id="file-input" accept=".glb,.gltf" onchange="loadModel(event)">
+    <div class="tip-card">
+      <span class="tip-icon">📱</span>
+      <span class="tip-text">
+        <strong style="color:var(--text);">AR works on:</strong><br>
+        Android — Chrome, Samsung Internet, Firefox<br>
+        iOS — Safari (uses Quick Look / USDZ auto-convert)
+      </span>
+    </div>
+
+    <div style="flex:1;"></div>
+
+    <button class="btn btn-warm" id="launch-btn" disabled onclick="launchViewer()" style="width:100%;margin-bottom:8px;">
+      ✨ Launch 3D Viewer
+    </button>
+    <button class="btn btn-ghost" onclick="useDemoModel()" style="width:100%;">
+      🐱 Use demo cat (no file needed)
+    </button>
+  </div>
+</div>
+
+<!-- Fallback AR controls (shown when user requests AR but WebXR is not presenting) -->
+<div id="fallback-ar-controls" class="ar-interaction-ui hidden" style="position: fixed; left: 50%; transform: translateX(-50%); bottom: 24px; z-index: 60;">
+  <div class="ar-bubble" id="fallback-ar-bubble">Purrrr~ 💕</div>
+  <div class="ar-stats" id="fallback-ar-stats">
+    <span>💖 <span id="fallback-ar-val-happy">70</span>%</span>
+    <span>🍎 <span id="fallback-ar-val-full">40</span>%</span>
+  </div>
+  <div class="ar-mood-row">
+    <button type="button" class="ar-mood-btn" data-act="feed" title="Feed">🍎</button>
+    <button type="button" class="ar-mood-btn" data-act="pet" title="Pet">🤚</button>
+    <button type="button" class="ar-mood-btn" data-act="play" title="Play">🧶</button>
+    <button type="button" class="ar-mood-btn" data-act="sleep" title="Sleep">😴</button>
+  </div>
+  <div class="ar-action-row" style="margin-top:8px;">
+    <button type="button" class="ar-action-btn" id="fallback-ar-btn-drink" title="Drink water">💧</button>
+    <button type="button" class="ar-action-btn" id="fallback-ar-btn-stats" title="Stats">📊</button>
+    <button type="button" class="ar-action-btn" id="fallback-ar-btn-task" title="Complete task">✅</button>
+    <button type="button" class="ar-action-btn" id="fallback-ar-btn-photo" title="Screenshot">📸</button>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     MODEL VIEWER — 3D preview + native AR
+     ═══════════════════════════════════════════════ -->
+<model-viewer
+  id="viewer"
+  alt="Your pet"
+  ar
+  ar-modes="webxr scene-viewer quick-look"
+  ar-scale="auto"
+  camera-controls
+  touch-action="pan-y"
+  auto-rotate
+  auto-rotate-delay="2000"
+  rotation-per-second="18deg"
+  shadow-intensity="1.2"
+  shadow-softness="0.8"
+  exposure="1.1"
+  environment-image="neutral"
+  camera-orbit="30deg 75deg auto"
+  min-camera-orbit="auto 30deg auto"
+  max-camera-orbit="auto 90deg auto"
+  interaction-prompt="none"
+  style="display:none;"
+>
+  <!-- Custom loading UI -->
+  <div class="mv-progress" slot="progress-bar">
+    <div class="mv-progress-text">Loading model...</div>
+    <div class="mv-progress-bar">
+      <div class="mv-progress-fill" id="load-progress" style="width:0%;"></div>
+    </div>
   </div>
 
+  <!-- AR: hint to find a surface (WebXR session started) -->
+  <div class="ar-place-hint">👆 Move your phone to find a surface</div>
+
+  <!-- AR: interaction UI when object is placed (WebXR only) -->
+  <div class="ar-interaction-ui">
+    <div class="ar-bubble" id="ar-bubble">Purrrr~ 💕</div>
+    <!-- Stats strip (toggle in AR) -->
+    <div class="ar-stats" id="ar-stats">
+      <span>💖 <span id="ar-val-happy">70</span>%</span>
+      <span>🍎 <span id="ar-val-full">40</span>%</span>
+    </div>
+    <div class="ar-mood-row">
+      <button type="button" class="ar-mood-btn" data-act="feed" title="Feed">🍎</button>
+      <button type="button" class="ar-mood-btn" data-act="pet" title="Pet">🤚</button>
+      <button type="button" class="ar-mood-btn" data-act="play" title="Play">🧶</button>
+      <button type="button" class="ar-mood-btn" data-act="sleep" title="Sleep">😴</button>
+    </div>
+    <div class="ar-action-row">
+      <button type="button" class="ar-action-btn" id="ar-btn-drink" title="Drink water">💧</button>
+      <button type="button" class="ar-action-btn" id="ar-btn-stats" title="Stats">📊</button>
+      <button type="button" class="ar-action-btn" id="ar-btn-task" title="Complete task">✅</button>
+      <button type="button" class="ar-action-btn" id="ar-btn-photo" title="Screenshot">📸</button>
+    </div>
+    <span class="ar-hint">Tap to interact with your pet</span>
+  </div>
+
+  <!-- AR prompt (shown when entering AR) -->
+  <div slot="ar-button" id="custom-ar-slot" style="display:none;"></div>
+</model-viewer>
+
+<!-- ═══════════════════════════════════════════════
+     OVERLAY UI
+     ═══════════════════════════════════════════════ -->
+<div id="overlay" style="display:none;">
+
+  <!-- Top bar -->
+  <div class="top-bar">
+    <div class="brand"><em>comfort</em></div>
+    <div class="pill">
+      <div class="dot" id="status-dot" style="background:var(--green);"></div>
+      <span id="status-text">3D Preview</span>
+    </div>
+  </div>
+
+  <!-- AI MODE ACTION (hidden until AI mode is active) -->
+  <div id="ai-action" class="pill hidden" title="Start AI scan" style="position: absolute; left:50%; transform: translateX(-50%); top: calc(var(--safe-top) + 64px); cursor: pointer; z-index:12;">
+    🔎 AI Mode — Tap to scan for a glass
+  </div>
+
+  <!-- Stats -->
+  <div class="stats-bar" id="stats-panel">
+    <div class="stat-row">
+      <span class="stat-emoji">💖</span>
+      <span class="stat-label">Happy</span>
+      <div class="stat-track"><div class="stat-fill" id="bar-happy" style="width:70%;background:linear-gradient(90deg,var(--warm),var(--warm-light));"></div></div>
+      <span class="stat-val" id="val-happy">70%</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-emoji">🍎</span>
+      <span class="stat-label">Full</span>
+      <div class="stat-track"><div class="stat-fill" id="bar-full" style="width:40%;background:linear-gradient(90deg,var(--green),#5BB88A);"></div></div>
+      <span class="stat-val" id="val-full">40%</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-emoji">🔥</span>
+      <span class="stat-label">Streak</span>
+      <div class="stat-track"><div class="stat-fill" style="width:25%;background:linear-gradient(90deg,#E8C87C,#D4A85F);"></div></div>
+      <span class="stat-val">7d</span>
+    </div>
+  </div>
+
+  <!-- Center instructions (fade out after interaction) -->
+  <div class="instructions" id="instructions">
+    <h2>Meet your pet ✨</h2>
+    <p>Orbit with one finger, pinch to zoom</p>
+    <div class="hint-orbit">
+      <span>👆</span> Drag to rotate
+    </div>
+  </div>
+
+  <!-- Reaction bubble -->
+  <div class="bubble" id="bubble">Purrrr~ 💕</div>
+
+  <!-- Bottom controls -->
+  <div class="bottom">
+    <div class="mood-row" id="mood-row">
+      <button class="mood-btn" data-act="feed" title="Feed">🍎</button>
+      <button class="mood-btn" data-act="pet" title="Pet">🤚</button>
+      <button class="mood-btn" data-act="play" title="Play">🧶</button>
+      <button class="mood-btn" data-act="sleep" title="Sleep">😴</button>
+    </div>
+    <div class="action-row">
+      <button class="btn btn-icon btn-ghost" id="btn-stats" title="Stats">📊</button>
+      <button class="btn btn-green" id="btn-ar" style="flex:2;">🔮 View in AR</button>
+      <button class="btn btn-icon btn-ghost" id="btn-photo" title="Screenshot">📸</button>
+      <button class="btn btn-icon btn-ghost" id="btn-ai-drink" title="Point at a glass for a reminder">💧</button>
+    </div>
+    <div class="action-row">
+      <button class="btn btn-ghost" id="btn-task" style="flex:1;padding:11px;">✅ Complete Task</button>
+      <button class="btn btn-ghost" id="btn-back" style="flex:1;padding:11px;" onclick="goBack()">← Change Model</button>
+    </div>
+  </div>
+</div>
+
+<div id="particles"></div>
+
+<!-- ═══════════════════════════════════════════════
+     AI OVERLAY — camera + object detection (e.g. glass → "Drink water")
+     ═══════════════════════════════════════════════ -->
+<div class="ai-overlay" id="ai-overlay">
+  <div class="ai-overlay-inner">
+    <video id="ai-video" autoplay playsinline muted></video>
+    <div class="ai-status" id="ai-status">Starting camera...</div>
+    <div class="ai-bubble" id="ai-drink-bubble">Drink water! 💧</div>
+    <button type="button" class="ai-close" id="ai-close" title="Close">✕</button>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     LOGIC
+     ═══════════════════════════════════════════════ -->
 <script>
-  const mv = document.getElementById('pet-model');
-  const bubble = document.getElementById('status-bubble');
+  /* ── State ── */
+  const S = { happiness: 70, fullness: 40, glbBlob: null, glbUrl: null };
 
-  function loadModel(event) {
-    const file = event.target.files[0];
-    const url = URL.createObjectURL(file);
-    mv.src = url;
-    document.getElementById('upload-ui').style.display = 'none';
+  const REACTIONS = {
+    pet:  ['Purrrr~ 💕','Mrrrow! 😻','So cozy~ ✨','*nuzzle* 🥰'],
+    feed: ['Yummy! 🍎','Nom nom~ 😋','More please! 🐟','Delicious! ✨'],
+    play: ['Wheee! 🧶','Catch me! 🐾','*pounce* 😸','So fun! 🎉'],
+    sleep:['Zzz... 😴','*curls up* 💤','Nap time~ 🌙','So sleepy... 💭'],
+    task: ['You did it! 🎉','Proud of you! ⭐','Amazing! ✨','Keep going! 💪'],
+  };
+
+  const viewer = document.getElementById('viewer');
+
+  /* ── File upload ── */
+  const glbInput = document.getElementById('glb-input');
+  const uploadZone = document.getElementById('upload-zone');
+  const filePreview = document.getElementById('file-preview');
+
+  glbInput.addEventListener('change', (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    S.glbBlob = file;
+    if (S.glbUrl) URL.revokeObjectURL(S.glbUrl);
+    S.glbUrl = URL.createObjectURL(file);
+
+    document.getElementById('file-name').textContent = file.name;
+    document.getElementById('file-size').textContent = (file.size / (1024 * 1024)).toFixed(1) + ' MB';
+    filePreview.classList.add('show');
+    uploadZone.classList.add('has-file');
+    uploadZone.querySelector('.title').textContent = 'File selected ✓';
+    document.getElementById('launch-btn').disabled = false;
+  });
+
+  window.clearFile = () => {
+    S.glbBlob = null;
+    if (S.glbUrl) { URL.revokeObjectURL(S.glbUrl); S.glbUrl = null; }
+    glbInput.value = '';
+    filePreview.classList.remove('show');
+    uploadZone.classList.remove('has-file');
+    uploadZone.querySelector('.title').textContent = 'Upload your 3D model';
+    document.getElementById('launch-btn').disabled = true;
+  };
+
+  /* ── Demo model (procedural GLB from Google sample) ── */
+  window.useDemoModel = () => {
+    // Use a publicly hosted sample GLB
+    S.glbUrl = 'https://modelviewer.dev/shared-assets/models/Astronaut.glb';
+    S.glbBlob = null;
+    launchViewer();
+  };
+
+  /* ── Launch viewer ── */
+  window.launchViewer = () => {
+    if (!S.glbUrl) return;
+
+    document.getElementById('upload-screen').classList.add('hidden');
+    viewer.style.display = 'block';
+    document.getElementById('overlay').style.display = 'flex';
+
+    // Set model source
+    viewer.setAttribute('src', S.glbUrl);
+
+    // Listen for load complete
+    viewer.addEventListener('load', () => {
+      document.querySelector('.mv-progress').style.display = 'none';
+    }, { once: true });
+
+    // Track loading progress
+    viewer.addEventListener('progress', (e) => {
+      const pct = Math.round(e.detail.totalProgress * 100);
+      document.getElementById('load-progress').style.width = pct + '%';
+    });
+
+    // Fade instructions after first interaction
+    viewer.addEventListener('camera-change', () => {
+      document.getElementById('instructions').classList.add('fade');
+    }, { once: true });
+  };
+
+  window.goBack = () => {
+    viewer.style.display = 'none';
+    document.getElementById('overlay').style.display = 'none';
+    document.getElementById('upload-screen').classList.remove('hidden');
+    document.querySelector('.mv-progress').style.display = 'flex';
+    document.getElementById('instructions').classList.remove('fade');
+  };
+
+  /* ── AR button ── */
+  document.getElementById('btn-ar').addEventListener('click', () => {
+    // model-viewer exposes an activateAR() method
+    if (viewer.canActivateAR) {
+      viewer.activateAR();
+    } else {
+      // Fallback: show instructions
+      const msg = /iPhone|iPad/.test(navigator.userAgent)
+        ? 'On iOS: AR uses Quick Look. Make sure you\'re on Safari and the model loads first.'
+        : /Android/.test(navigator.userAgent)
+          ? 'On Android: Make sure Google Play Services for AR is installed (Settings → Apps → Google Play Services for AR).'
+          : 'AR requires a mobile device with camera access. Try opening this page on your phone.';
+      alert('AR not available on this device.\n\n' + msg);
+    }
+  });
+
+  // Show a fallback AR controls panel when the user requests AR.
+  // This helps on platforms (Quick Look) where the page itself is not presenting WebXR,
+  // so the user still has familiar interaction buttons before/after AR.
+  const fallbackAr = document.getElementById('fallback-ar-controls');
+  document.getElementById('btn-ar').addEventListener('click', () => {
+    if (fallbackAr) fallbackAr.classList.remove('hidden');
+  });
+
+  // Observe model-viewer's `ar-status` attribute and toggle UI based on session state.
+  const mo = new MutationObserver((records) => {
+    for (const r of records) {
+      if (r.attributeName !== 'ar-status') continue;
+      const val = viewer.getAttribute('ar-status');
+      // When object is placed in WebXR, ensure AR interaction UI is visible.
+      if (val === 'object-placed') {
+        // hide fallback (we're in real in-viewer AR)
+        if (fallbackAr) fallbackAr.classList.add('hidden');
+        // also show the 2D overlay stats and AR bubble in case overlay is hidden
+        document.getElementById('overlay').style.display = 'flex';
+      }
+      // When exiting AR, hide fallback and restore overlay state
+      if (!val || val === 'not-presenting') {
+        if (fallbackAr) fallbackAr.classList.add('hidden');
+        // keep overlay visible when not presenting
+      }
+    }
+  });
+  mo.observe(viewer, { attributes: true });
+
+  // Update AR button state after model loads
+  viewer.addEventListener('load', () => {
+    const arBtn = document.getElementById('btn-ar');
+    if (viewer.canActivateAR) {
+      arBtn.textContent = '🔮 View in AR';
+      arBtn.classList.remove('btn-ghost');
+      arBtn.classList.add('btn-green');
+    } else {
+      arBtn.textContent = '🔮 AR (not available)';
+      arBtn.classList.remove('btn-green');
+      arBtn.classList.add('btn-ghost');
+    }
+  });
+
+  /* ── Mood actions ── */
+  function doAction(action) {
+    switch (action) {
+      case 'pet':  S.happiness = Math.min(100, S.happiness + 8); animatePet('bounce'); break;
+      case 'feed': S.fullness = Math.min(100, S.fullness + 15); animatePet('nod'); break;
+      case 'play': S.happiness = Math.min(100, S.happiness + 10); animatePet('spin'); break;
+      case 'sleep': animatePet('settle'); break;
+      case 'task':
+        S.happiness = Math.min(100, S.happiness + 15);
+        S.fullness = Math.min(100, S.fullness + 10);
+        animatePet('bounce');
+        break;
+    }
+    updateStats();
+    showBubble(action);
+    spawnParticles(action);
   }
 
-  function performAction(action) {
-    const lines = {
-      feed: "Yummy! 🍖",
-      play: "Catch the yarn! 🧶",
-      pet: "I love scritches! ❤️"
+  // Animate via model-viewer camera/orbit manipulation
+  let animating = false;
+  function animatePet(type) {
+    if (animating) return;
+    animating = true;
+
+    const currentOrbit = viewer.getCameraOrbit();
+    const origTheta = currentOrbit.theta;
+    const origPhi = currentOrbit.phi;
+    const origRadius = currentOrbit.radius;
+
+    if (type === 'bounce') {
+      // Quick zoom in-out
+      viewer.cameraOrbit = `${origTheta}rad ${origPhi * 0.85}rad ${origRadius * 0.88}m`;
+      setTimeout(() => {
+        viewer.cameraOrbit = `${origTheta}rad ${origPhi}rad ${origRadius}m`;
+        animating = false;
+      }, 300);
+    } else if (type === 'spin') {
+      // Spin the model
+      const startTheta = origTheta;
+      viewer.cameraOrbit = `${startTheta + Math.PI * 2}rad ${origPhi}rad ${origRadius}m`;
+      setTimeout(() => { animating = false; }, 800);
+    } else if (type === 'nod') {
+      viewer.cameraOrbit = `${origTheta}rad ${origPhi * 0.92}rad ${origRadius * 0.95}m`;
+      setTimeout(() => {
+        viewer.cameraOrbit = `${origTheta}rad ${origPhi * 1.05}rad ${origRadius}m`;
+        setTimeout(() => {
+          viewer.cameraOrbit = `${origTheta}rad ${origPhi}rad ${origRadius}m`;
+          animating = false;
+        }, 200);
+      }, 200);
+    } else {
+      // settle
+      viewer.cameraOrbit = `${origTheta}rad ${origPhi * 1.1}rad ${origRadius * 1.05}m`;
+      setTimeout(() => { animating = false; }, 600);
+    }
+  }
+
+  /* ── Stats (2D overlay + AR in-viewer strip) ── */
+  function updateStats() {
+    document.getElementById('bar-happy').style.width = S.happiness + '%';
+    document.getElementById('val-happy').textContent = S.happiness + '%';
+    document.getElementById('bar-full').style.width = S.fullness + '%';
+    document.getElementById('val-full').textContent = S.fullness + '%';
+    const arHappy = document.getElementById('ar-val-happy');
+    const arFull = document.getElementById('ar-val-full');
+    if (arHappy) arHappy.textContent = Math.round(S.happiness);
+    if (arFull) arFull.textContent = Math.round(S.fullness);
+  }
+
+  /* ── Bubble (2D overlay + AR in-viewer bubble) ── */
+  function showBubble(action) {
+    const list = REACTIONS[action] || REACTIONS.pet;
+    const msg = list[Math.floor(Math.random() * list.length)];
+    [document.getElementById('bubble'), document.getElementById('ar-bubble')].forEach(b => {
+      if (!b) return;
+      b.textContent = msg;
+      b.classList.add('show');
+      clearTimeout(b._t);
+      b._t = setTimeout(() => b.classList.remove('show'), 2200);
+    });
+  }
+
+  /* ── Particles ── */
+  function spawnParticles(action) {
+    const c = document.getElementById('particles');
+    const emojis = { pet:'💕', feed:'🍎', play:'⭐', sleep:'💤', task:'🎉' };
+    for (let i = 0; i < 6; i++) {
+      const el = document.createElement('div');
+      el.className = 'particle';
+      el.textContent = emojis[action] || '✨';
+      el.style.left = (35 + Math.random() * 30) + '%';
+      el.style.top = (40 + Math.random() * 20) + '%';
+      el.style.animationDelay = (i * 0.07) + 's';
+      c.appendChild(el);
+      setTimeout(() => el.remove(), 1300);
+    }
+  }
+
+  /* ── Wire events ── */
+  document.querySelectorAll('.mood-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      doAction(btn.dataset.act);
+      btn.classList.add('pop');
+      setTimeout(() => btn.classList.remove('pop'), 350);
+    });
+  });
+
+  /* AR mood buttons (inside model-viewer — visible in WebXR when object is placed) */
+  viewer.querySelectorAll('.ar-mood-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      doAction(btn.dataset.act);
+    });
+  });
+
+  // Wire the fallback AR controls to the same logic
+  (function wireFallbackAR(){
+    const fallback = document.getElementById('fallback-ar-controls');
+    if (!fallback) return;
+
+    fallback.querySelectorAll('.ar-mood-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        doAction(btn.dataset.act);
+        btn.classList.add('pop');
+        setTimeout(() => btn.classList.remove('pop'), 350);
+      });
+    });
+
+    const fDrink = document.getElementById('fallback-ar-btn-drink');
+    const fStats = document.getElementById('fallback-ar-btn-stats');
+    const fTask = document.getElementById('fallback-ar-btn-task');
+    const fPhoto = document.getElementById('fallback-ar-btn-photo');
+
+    if (fDrink) fDrink.addEventListener('click', (e) => { e.stopPropagation(); showArDrinkReminder(); });
+    if (fStats) fStats.addEventListener('click', (e) => { e.stopPropagation(); document.getElementById('fallback-ar-stats').classList.toggle('show'); });
+    if (fTask) fTask.addEventListener('click', (e) => { e.stopPropagation(); doAction('task'); });
+    if (fPhoto) fPhoto.addEventListener('click', (e) => {
+      e.stopPropagation();
+      // Reuse same screenshot flow as normal photo button
+      viewer.toBlob({ idealAspect: false }).then(blob => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.download = `comfort-ar-${Date.now()}.png`;
+        a.href = url; a.click(); URL.revokeObjectURL(url);
+        const b = document.getElementById('fallback-ar-bubble');
+        if (b) { b.textContent = 'Saved! 📸'; b.classList.add('show'); clearTimeout(b._t); b._t = setTimeout(() => b.classList.remove('show'), 2000); }
+      }).catch(() => {
+        const b = document.getElementById('fallback-ar-bubble');
+        if (b) { b.textContent = 'Screenshot saved'; b.classList.add('show'); clearTimeout(b._t); b._t = setTimeout(() => b.classList.remove('show'), 2000); }
+      });
+    });
+  })();
+
+  /* AR action buttons: 💧 Drink, 📊 Stats, ✅ Task, 📸 Photo (in AR mode) */
+  const arBubble = document.getElementById('ar-bubble');
+  function showArDrinkReminder() {
+    arBubble.textContent = 'Drink water! 💧';
+    arBubble.classList.add('show');
+    clearTimeout(arBubble._t);
+    arBubble._t = setTimeout(() => arBubble.classList.remove('show'), 3500);
+    if (typeof speechSynthesis !== 'undefined' && speechSynthesis.speak) {
+      const u = new SpeechSynthesisUtterance('Drink water!');
+      u.rate = 0.9;
+      speechSynthesis.speak(u);
+    }
+  }
+
+  viewer.querySelector('#ar-btn-drink').addEventListener('click', (e) => {
+    e.stopPropagation();
+    showArDrinkReminder();
+  });
+  viewer.querySelector('#ar-btn-stats').addEventListener('click', (e) => {
+    e.stopPropagation();
+    document.getElementById('ar-stats').classList.toggle('show');
+  });
+  viewer.querySelector('#ar-btn-task').addEventListener('click', (e) => {
+    e.stopPropagation();
+    doAction('task');
+  });
+  viewer.querySelector('#ar-btn-photo').addEventListener('click', (e) => {
+    e.stopPropagation();
+    viewer.toBlob({ idealAspect: false }).then(blob => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.download = `comfort-ar-${Date.now()}.png`;
+      a.href = url;
+      a.click();
+      URL.revokeObjectURL(url);
+      arBubble.textContent = 'Saved! 📸';
+      arBubble.classList.add('show');
+      clearTimeout(arBubble._t);
+      arBubble._t = setTimeout(() => arBubble.classList.remove('show'), 2000);
+    }).catch(() => {
+      arBubble.textContent = 'Screenshot from main view';
+      arBubble.classList.add('show');
+      clearTimeout(arBubble._t);
+      arBubble._t = setTimeout(() => arBubble.classList.remove('show'), 2500);
+    });
+  });
+
+  /* Tap on 3D model in non-AR mode = pet */
+  viewer.addEventListener('click', () => {
+    if (!viewer.getAttribute('ar-status') || viewer.getAttribute('ar-status') === 'not-presenting') {
+      doAction('pet');
+    }
+  });
+
+  document.getElementById('btn-stats').addEventListener('click', () => {
+    document.getElementById('stats-panel').classList.toggle('show');
+  });
+
+  document.getElementById('btn-task').addEventListener('click', () => doAction('task'));
+
+  document.getElementById('btn-photo').addEventListener('click', () => {
+    // Flash
+    const flash = document.createElement('div');
+    flash.className = 'flash';
+    document.body.appendChild(flash);
+    setTimeout(() => flash.remove(), 400);
+
+    // model-viewer has a toBlob method for screenshots
+    viewer.toBlob({ idealAspect: false }).then(blob => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.download = `comfort-pet-${Date.now()}.png`;
+      a.href = url;
+      a.click();
+      URL.revokeObjectURL(url);
+    }).catch(() => {
+      // Fallback: canvas capture
+      const canvas = viewer.shadowRoot?.querySelector('canvas');
+      if (canvas) {
+        const a = document.createElement('a');
+        a.download = `comfort-pet-${Date.now()}.png`;
+        a.href = canvas.toDataURL('image/png');
+        a.click();
+      }
+    });
+  });
+
+  /* ── AI: object detection — glass/cup → "Drink water" ── */
+  const aiOverlay = document.getElementById('ai-overlay');
+  const aiVideo = document.getElementById('ai-video');
+  const aiStatus = document.getElementById('ai-status');
+  const aiDrinkBubble = document.getElementById('ai-drink-bubble');
+  let aiModel = null;
+  let aiStream = null;
+  let aiDetectionId = null;
+  let lastDrinkReminderAt = 0;
+  const DRINK_REMINDER_COOLDOWN_MS = 8000;
+  const GLASS_CLASSES = ['cup', 'wine glass'];
+
+  async function loadAIModel() {
+    if (aiModel) return aiModel;
+    aiStatus.textContent = 'Loading AI model...';
+    try {
+      const cocoSsd = await import('https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/+esm');
+      aiModel = await cocoSsd.default.load();
+      return aiModel;
+    } catch (e) {
+      console.error('AI model load failed', e);
+      aiStatus.textContent = 'AI failed to load. Try again.';
+      return null;
+    }
+  }
+
+  function showDrinkReminder() {
+    const now = Date.now();
+    if (now - lastDrinkReminderAt < DRINK_REMINDER_COOLDOWN_MS) return;
+    lastDrinkReminderAt = now;
+    aiDrinkBubble.classList.add('show');
+    clearTimeout(aiDrinkBubble._t);
+    aiDrinkBubble._t = setTimeout(() => aiDrinkBubble.classList.remove('show'), 3500);
+    if (typeof speechSynthesis !== 'undefined' && speechSynthesis.speak) {
+      const u = new SpeechSynthesisUtterance('Drink water!');
+      u.rate = 0.9;
+      speechSynthesis.speak(u);
+    }
+  }
+
+  async function runAIDetection() {
+    if (!aiVideo.srcObject || aiVideo.readyState < 2 || !aiModel) return;
+    try {
+      const predictions = await aiModel.detect(aiVideo);
+      const hasGlass = predictions.some(p =>
+        GLASS_CLASSES.includes(p.class.toLowerCase()) && p.score >= 0.5
+      );
+      if (hasGlass) showDrinkReminder();
+    } catch (_) { /* ignore frame errors */ }
+    if (aiDetectionId !== null) {
+      aiDetectionId = requestAnimationFrame(runAIDetection);
+    }
+  }
+
+  async function startAIDetection() {
+    aiOverlay.classList.add('show');
+    aiStatus.textContent = 'Starting camera...';
+    aiDrinkBubble.classList.remove('show');
+    try {
+      aiStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: 640, height: 480 } });
+      aiVideo.srcObject = aiStream;
+      aiVideo.onloadedmetadata = async () => {
+        aiVideo.play();
+        aiStatus.textContent = 'Point at a glass for a drink reminder';
+        const model = await loadAIModel();
+        if (model && aiDetectionId === null) {
+          aiDetectionId = requestAnimationFrame(runAIDetection);
+        }
+      };
+    } catch (e) {
+      aiStatus.textContent = 'Camera access denied or unavailable';
+    }
+  }
+
+  function stopAIDetection() {
+    if (aiDetectionId !== null) {
+      cancelAnimationFrame(aiDetectionId);
+      aiDetectionId = null;
+    }
+    if (aiStream) {
+      aiStream.getTracks().forEach(t => t.stop());
+      aiStream = null;
+    }
+    aiVideo.srcObject = null;
+    aiOverlay.classList.remove('show');
+  }
+
+  document.getElementById('btn-ai-drink').addEventListener('click', startAIDetection);
+  document.getElementById('ai-close').addEventListener('click', stopAIDetection);
+
+  // Passive stat decay
+  // --- AI mode helper: show a small action and expose a programmatic hook ---
+  (function setupAIModeHook(){
+    const aiAction = document.getElementById('ai-action');
+    if (aiAction) {
+      aiAction.addEventListener('click', () => {
+        // When user taps the pill, start the AI detection overlay
+        try { startAIDetection(); } catch (e) { /* ignore */ }
+        aiAction.classList.add('pulse');
+        setTimeout(() => aiAction.classList.remove('pulse'), 600);
+      });
+    }
+
+    // Expose a global helper so other parts of the app can toggle AI mode
+    window.setAIMode = function(enabled) {
+      const on = !!enabled;
+      if (aiAction) aiAction.classList.toggle('hidden', !on);
+      // update status pill in the top bar for quick feedback
+      const statusText = document.getElementById('status-text');
+      const statusDot = document.getElementById('status-dot');
+      if (statusText) statusText.textContent = on ? 'AI Mode' : '3D Preview';
+      if (statusDot) statusDot.style.background = on ? 'var(--warm)' : 'var(--green)';
+
+      if (on) {
+        // auto-start the camera/detection when AI mode is entered
+        try { startAIDetection(); } catch (e) { /* ignore */ }
+      } else {
+        stopAIDetection();
+      }
     };
-    
-    bubble.textContent = lines[action];
-    bubble.classList.add('show');
-    
-    // Auto-hide bubble after 2 seconds
-    setTimeout(() => bubble.classList.remove('show'), 2000);
 
-    // Optional: Trigger animations if your model has them
-    // mv.animationName = action === 'feed' ? 'Eat' : 'Idle';
-    // mv.play();
-  }
+    // Listen for optional custom events from the app
+    document.addEventListener('ai-mode:entered', () => window.setAIMode(true));
+    document.addEventListener('ai-mode:exited', () => window.setAIMode(false));
+  })();
+
+  setInterval(() => {
+    S.happiness = Math.max(0, S.happiness - 0.3);
+    S.fullness = Math.max(0, S.fullness - 0.5);
+    updateStats();
+  }, 6000);
 </script>
-
 </body>
 </html>
