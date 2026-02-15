@@ -327,6 +327,76 @@
     transition: opacity 0.25s, transform 0.25s;
   }
   .ar-bubble.show { opacity: 1; transform: translateX(-50%) translateY(-8px); }
+
+  /* ═══════════════════════════════════════
+     AI overlay (camera + object detection)
+     ═══════════════════════════════════════ */
+  .ai-overlay {
+    position: fixed; inset: 0; z-index: 150;
+    background: rgba(0,0,0,0.9);
+    display: none;
+    align-items: center;
+    justify-content: center;
+  }
+  .ai-overlay.show { display: flex; }
+  .ai-overlay-inner {
+    position: relative;
+    width: 100%;
+    max-width: 420px;
+    aspect-ratio: 3/4;
+    border-radius: 20px;
+    overflow: hidden;
+    border: 2px solid var(--border);
+  }
+  .ai-overlay #ai-video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .ai-status {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 12px 16px;
+    background: linear-gradient(0deg, rgba(0,0,0,0.85), transparent);
+    color: rgba(255,255,255,0.9);
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .ai-bubble {
+    position: absolute;
+    top: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: linear-gradient(135deg, #2D6A4F, #3D8B6A);
+    color: #FFF;
+    padding: 14px 24px;
+    border-radius: 16px;
+    font-size: 18px;
+    font-weight: 700;
+    box-shadow: 0 4px 24px rgba(45,106,79,0.4);
+    opacity: 0;
+    transition: opacity 0.3s, transform 0.3s;
+    pointer-events: none;
+  }
+  .ai-bubble.show { opacity: 1; transform: translateX(-50%) translateY(-4px); }
+  .ai-close {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(0,0,0,0.6);
+    color: #FFF;
+    font-size: 20px;
+    cursor: pointer;
+    z-index: 2;
+    -webkit-tap-highlight-color: transparent;
+  }
 </style>
 </head>
 <body>
@@ -502,6 +572,7 @@
       <button class="btn btn-icon btn-ghost" id="btn-stats" title="Stats">📊</button>
       <button class="btn btn-green" id="btn-ar" style="flex:2;">🔮 View in AR</button>
       <button class="btn btn-icon btn-ghost" id="btn-photo" title="Screenshot">📸</button>
+      <button class="btn btn-icon btn-ghost" id="btn-ai-drink" title="Point at a glass for a reminder">💧</button>
     </div>
     <div class="action-row">
       <button class="btn btn-ghost" id="btn-task" style="flex:1;padding:11px;">✅ Complete Task</button>
@@ -511,6 +582,18 @@
 </div>
 
 <div id="particles"></div>
+
+<!-- ═══════════════════════════════════════════════
+     AI OVERLAY — camera + object detection (e.g. glass → "Drink water")
+     ═══════════════════════════════════════════════ -->
+<div class="ai-overlay" id="ai-overlay">
+  <div class="ai-overlay-inner">
+    <video id="ai-video" autoplay playsinline muted></video>
+    <div class="ai-status" id="ai-status">Starting camera...</div>
+    <div class="ai-bubble" id="ai-drink-bubble">Drink water! 💧</div>
+    <button type="button" class="ai-close" id="ai-close" title="Close">✕</button>
+  </div>
+</div>
 
 <!-- ═══════════════════════════════════════════════
      LOGIC
@@ -784,6 +867,96 @@
       }
     });
   });
+
+  /* ── AI: object detection — glass/cup → "Drink water" ── */
+  const aiOverlay = document.getElementById('ai-overlay');
+  const aiVideo = document.getElementById('ai-video');
+  const aiStatus = document.getElementById('ai-status');
+  const aiDrinkBubble = document.getElementById('ai-drink-bubble');
+  let aiModel = null;
+  let aiStream = null;
+  let aiDetectionId = null;
+  let lastDrinkReminderAt = 0;
+  const DRINK_REMINDER_COOLDOWN_MS = 8000;
+  const GLASS_CLASSES = ['cup', 'wine glass'];
+
+  async function loadAIModel() {
+    if (aiModel) return aiModel;
+    aiStatus.textContent = 'Loading AI model...';
+    try {
+      const cocoSsd = await import('https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/+esm');
+      aiModel = await cocoSsd.default.load();
+      return aiModel;
+    } catch (e) {
+      console.error('AI model load failed', e);
+      aiStatus.textContent = 'AI failed to load. Try again.';
+      return null;
+    }
+  }
+
+  function showDrinkReminder() {
+    const now = Date.now();
+    if (now - lastDrinkReminderAt < DRINK_REMINDER_COOLDOWN_MS) return;
+    lastDrinkReminderAt = now;
+    aiDrinkBubble.classList.add('show');
+    clearTimeout(aiDrinkBubble._t);
+    aiDrinkBubble._t = setTimeout(() => aiDrinkBubble.classList.remove('show'), 3500);
+    if (typeof speechSynthesis !== 'undefined' && speechSynthesis.speak) {
+      const u = new SpeechSynthesisUtterance('Drink water!');
+      u.rate = 0.9;
+      speechSynthesis.speak(u);
+    }
+  }
+
+  async function runAIDetection() {
+    if (!aiVideo.srcObject || aiVideo.readyState < 2 || !aiModel) return;
+    try {
+      const predictions = await aiModel.detect(aiVideo);
+      const hasGlass = predictions.some(p =>
+        GLASS_CLASSES.includes(p.class.toLowerCase()) && p.score >= 0.5
+      );
+      if (hasGlass) showDrinkReminder();
+    } catch (_) { /* ignore frame errors */ }
+    if (aiDetectionId !== null) {
+      aiDetectionId = requestAnimationFrame(runAIDetection);
+    }
+  }
+
+  async function startAIDetection() {
+    aiOverlay.classList.add('show');
+    aiStatus.textContent = 'Starting camera...';
+    aiDrinkBubble.classList.remove('show');
+    try {
+      aiStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: 640, height: 480 } });
+      aiVideo.srcObject = aiStream;
+      aiVideo.onloadedmetadata = async () => {
+        aiVideo.play();
+        aiStatus.textContent = 'Point at a glass for a drink reminder';
+        const model = await loadAIModel();
+        if (model && aiDetectionId === null) {
+          aiDetectionId = requestAnimationFrame(runAIDetection);
+        }
+      };
+    } catch (e) {
+      aiStatus.textContent = 'Camera access denied or unavailable';
+    }
+  }
+
+  function stopAIDetection() {
+    if (aiDetectionId !== null) {
+      cancelAnimationFrame(aiDetectionId);
+      aiDetectionId = null;
+    }
+    if (aiStream) {
+      aiStream.getTracks().forEach(t => t.stop());
+      aiStream = null;
+    }
+    aiVideo.srcObject = null;
+    aiOverlay.classList.remove('show');
+  }
+
+  document.getElementById('btn-ai-drink').addEventListener('click', startAIDetection);
+  document.getElementById('ai-close').addEventListener('click', stopAIDetection);
 
   // Passive stat decay
   setInterval(() => {
